@@ -1,0 +1,78 @@
+name: Build Yemen Maps APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'yemen_maps_ready_v2_find_it.zip'
+      - '.github/workflows/build-apk.yml'
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Flutter stable
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Extract app source
+        run: |
+          rm -rf build_source
+          mkdir -p build_source
+          unzip -q yemen_maps_ready_v2_find_it.zip -d build_source
+          test -f build_source/yemen_maps_ready/pubspec.yaml
+
+      - name: Create Android platform files
+        working-directory: build_source/yemen_maps_ready
+        run: |
+          flutter create . --platforms=android --org tech.qodynex --project-name yemen_maps
+
+      - name: Configure Android permissions
+        working-directory: build_source/yemen_maps_ready
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/src/main/AndroidManifest.xml')
+          s = p.read_text()
+          perms = '''
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+          '''
+          if 'android.permission.INTERNET' not in s:
+              s = s.replace(
+                  '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
+                  '<manifest xmlns:android="http://schemas.android.com/apk/res/android">' + perms
+              )
+          p.write_text(s)
+          PY
+
+      - name: Install Flutter dependencies
+        working-directory: build_source/yemen_maps_ready
+        run: flutter pub get
+
+      - name: Build debug APK
+        working-directory: build_source/yemen_maps_ready
+        run: flutter build apk --debug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yemen-maps-debug-apk
+          path: build_source/yemen_maps_ready/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
